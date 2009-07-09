@@ -5,11 +5,11 @@
  * @package Settings Controller
  * @author Kyle Hendricks kyleh@mendtechnologies.com
  **/
-Class Settings extends Controller
+Class Settings extends MY_Controller
 {
 	function __construct()
 	{
-		parent::Controller();
+		parent::MY_Controller();
 		$this->load->helper(array('form', 'url'));
 	}
 	
@@ -32,7 +32,7 @@ Class Settings extends Controller
 		$data['title'] = 'Tick to FreshBooks Invoice Generator :: API Settings';
 		$data['heading'] = 'Set up FreshBooks';
 		$data['submitname'] = 'Save API Settings';
-		$data['name'] = $this->session->userdata('name');
+		$data['name'] = $this->session->userdata('email');
 		$data['fburl']   = '';
 		$data['fbtoken'] = '';
 
@@ -40,31 +40,21 @@ Class Settings extends Controller
 		$data['tickurl'] = $_COOKIE['fbplustick-url'];
 		$data['tickemail']   = $_COOKIE['fbplustick-email'];
 
-		// get password from db
-		$this->load->model('User_model', 'user');
-
-		if ($user = $this->user->getuser($_COOKIE['fbplustick-email']))
-		{
-			$data['tickpassword'] = $user->password;
-		}
-		else
-		{
-			$data['tickpassword'] = '';
-		}
-
 		// navigation hack
 		$data['projectsActive'] = '';
 		$data['settingsActive'] = array('class' => 'active');
 
 		//check for settings
 		$this->load->model('Settings_model', 'settings');
-		$current_settings = $this->settings->getSettings();
+		$this->load->model('User_model', 'user');
+		
+		$current_settings = $this->settings->get_settings();
+		
 		if ($current_settings) {
 			$data['submitname'] = 'Update API Settings';
 			//set form fields
 			$data['fburl']   = $current_settings->fburl;
 			$data['fbtoken'] = $current_settings->fbtoken;
-			$data['tickpassword'] = $current_settings->tickpassword;
 		}
 
 		$this->load->library('validation');
@@ -75,14 +65,12 @@ Class Settings extends Controller
 		$rules['fbtoken']	= "required";
 		$rules['tickurl']		= "required";
 		$rules['tickemail']		= "required";
-		$rules['tickpassword']	= "required";
 		$this->validation->set_rules($rules);
 		//set form fields
 		$fields['fburl']	= 'Freshbooks URL';
-		$fields['fbtoken']	= 'Freshbooks Token';
+		$fields['fbtoken'] 	= 'Freshbooks Token';
 		$fields['tickurl']		= "Tick URL";
 		$fields['tickemail']	= 'Tick Email Address';
-		$fields['tickpassword']	= 'Tick Password';
 		$this->validation->set_fields($fields);
 
 		if ($this->validation->run() == FALSE){

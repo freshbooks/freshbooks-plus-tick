@@ -20,8 +20,13 @@
 								
 								<?php echo form_open('user/verify')."\n"; ?>
 
-								<label for="url" class="login-label">Tick URL</label> <input type="text" name="tickurl" value="<?= $tickurl ?>" /> <br />
-								<label for="email" class="login-label">Tick Email</label> <input type="text" name="tickemail" value="<?= $tickemail ?>" /> 
+								<label for="subdomain" class="login-label">Tick URL</label> 
+								<input type="text" name="ticksubdomain" value="<?= $ticksubdomain ?>" />
+								<br />
+								<span id="url-help-text"><strong>xxxxx.tickspot.com</strong></span>
+								<br />
+								<label for="email" id="email-login-label" class="login-label">Tick Email</label> 
+								<input type="text" name="tickemail" value="<?= $tickemail ?>" /> 
 								<br />
 								<label for="password" class="login-label">Tick Password</label> <input type="password" name="tickpassword" />
 								

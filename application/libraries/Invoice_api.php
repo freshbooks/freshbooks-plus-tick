@@ -38,47 +38,118 @@ Class Invoice_api
 	
 	function __construct($params)
 	{
-		$this->fburl = $params['fburl'];
+		$this->fburl   = $params['fburl'];
 		$this->fbtoken = $params['fbtoken'];
 		$this->tickurl = $params['tickurl'];
-		$this->auth = "email=".$params['tickemail']."&password=".$params['tickpassword'];
+		$this->auth    = array(
+			'email'    => $params['tickemail'],
+			'password' => $params['tickpassword']
+		);
 	}
 	
 	/**
-	 * Sends requests to Tick API.
-	 *
-	 * @param $url string
-	 * @return string/object	string containing error desc on error, xmlobject on success 
-	 **/
-	private function loadxml($url, $useless = false)
+	 * Convert a multi-dimensional array into XML. This is used to convert 
+	 * arrays into XML requests. Note, the keys in the array *must* contain
+	 * only characters that are valid for XML element names. Text node data
+	 * will be passed through htmlentities(), so characters with XML Entity 
+	 * equivalents (i.e. &, <, >) will be encoded properly. 
+	 * 
+	 * @return a portion of an XML document as a string.
+	 */
+	function array_to_xml($arr, $last_key = null)
 	{
+		$xmlstr = '';
+		foreach ($arr as $key => $val) 
+		{
+			// a numeric key indicates a non-associative array. these are 
+			// converted into XML sibling elements wrapped in the parent
+			// (i.e. <lines><line>..</line><line>...</line></lines>)
+			if (is_numeric($key)) 
+			{
+				// preserve the last key which should not be numeric
+				$xmlstr .= "<$last_key>" . $this->array_to_xml($val, $last_key) . "</$last_key>";
+				continue;
+			}
+			
+			if (is_array($val)) 
+			{
+				$keys = array_keys($val);
+				$wrap = false;
+			
+				foreach ($keys as $k) 
+					if (!is_numeric($k)) $wrap = true;
+				
+				if ($wrap) $xmlstr .= "<$key>";
+				$xmlstr .= $this->array_to_xml($val, $key);
+				if ($wrap) $xmlstr .= "</$key>";
+			} else {
+				$xmlstr .= "<$key>" . htmlentities($val) . "</$key>";
+			}
+		}
+		
+		return $xmlstr;
+	}
+	
+	/**
+	 * Sends a request to the Tick API.
+	 *
+	 * @param $method string  The Tick API method to call (i.e. clients).
+	 * @param $args   array   A hash containing parameters to the method call. 
+	 * @throws Exception If the Tick API request fails for any reason.
+	 * @return object a SimpleXMLElement instance with the tick response. 
+	 **/
+	private function send_tick_request($method, array $args = array())
+	{
+		$url = $this->tickurl . '/api/' . $method;
+		$url .= '?' . http_build_query(array_merge($this->auth, $args));
+		
+		// send request
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $url);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, $this->auth);
-		curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,15);
-		curl_setopt($ch,CURLOPT_RETURNTRANSFER,1);
+		curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+		curl_setopt($ch, CURLOPT_POST, 1);
+		
 		$result = curl_exec($ch);
+		$info   = curl_getinfo($ch);
+		$errno  = curl_errno($ch);
+		$error  = curl_error($ch);
+		
 		curl_close($ch);
 		
-		if (preg_match("/not valid/", $result) OR $result == FALSE)
+		// if we cannot get an http_code or the content_type, something is up.
+		if (!(array_key_exists('http_code', $info) && 
+		      array_key_exists('content_type', $info)))
 		{
-			// make a mostly useless check of the tickspot account credentials
-			if ($useless)
-			{
-				return false;
-			}
-			else
-			{
-				return 'Tick Error: '.$result.' Please check you Tick settings and try again.';
-			}
+			$msg = 'Error:';
+			if (!empty($result)) 
+				$msg .= ': ' . $result;
+			$msg .= ' (' . $errno . ', ' . $error . ') ';
+			$msg .= 'Please check your Tick settings and try again.';
+			throw new Exception($msg);
 		}
-		elseif(preg_match("/xml/", $result))
+		
+		// valid results:
+		// 1) HTTP 200 and application/xml content-type
+		// 2) HTTP 200, text/html content-type and empty string result of length 1. 
+		if ($info['http_code'] == 200 && strstr($info['content_type'], 'application/xml;'))
 		{
 			return simplexml_load_string($result);
-		}
-		else
+		} 
+		elseif ($info['http_code'] == 200 && strstr($info['content_type'], 'text/html;') && $result === ' ')
 		{
-			return $result;
+			return simplexml_load_string('');
+		}
+		{
+			$code = 0;
+			$msg = "Unexpected response from Tick. Errno: $errno";
+			if ($errno != 0) 
+				$msg .= ", Error: $error";
+			if (array_key_exists('http_code', $info)) {
+				$msg .= " HTTP Status Code: " . $info['http_code'];
+				$code = $info['http_code'];
+			}
+			throw new Exception($msg, $code);
 		}
 	}
 	
@@ -88,40 +159,57 @@ Class Invoice_api
 	 * @param $xml string
 	 * @return string/object	string containing error desc on error, xmlobject on success 
 	 **/
-	private function send_xml_request($xml)
+	private function send_freshbooks_request($method, $args)
 	{
+		$xml = '<?xml version="1.0" encoding="UTF-8"?>';
+		$xml .= '<request method="' . $method . '">';
+		$xml .= $this->array_to_xml($args);
+		$xml .= '</request>';
+		
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, $this->fburl);
 		curl_setopt($ch, CURLOPT_USERPWD, $this->fbtoken);
 		curl_setopt($ch, CURLOPT_POSTFIELDS, $xml);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
 		curl_setopt($ch,CURLOPT_CONNECTTIMEOUT,10);
+		
 		$result = curl_exec($ch);
+		$info   = curl_getinfo($ch);
+		$errno  = curl_errno($ch);
+		$error  = curl_error($ch);
+		
 		curl_close ($ch);
 		
 		//check for non xml result
-		if($result == FALSE)
+		if($result == FALSE || $info['http_code'] != 200)
 		{
-			return 'Error: Unable to connect to FreshBooks API.';
-		}
-		elseif(preg_match("/404 Error: Not Found/", $result) || preg_match("/DOCTYPE/", $result))
-		{
-			return "Error: <strong>404 Error: Not Found</strong>. Please check you FreshBooks API URL setting and try again.  The FreshBooks API url is different from your FreshBooks account url.";
+			$code = 0;
+			$msg = 'Error: Unable to connect to the FreshBooks API.';
+			if (array_key_exists('http_code', $info)) {
+				$msg .= ' HTTP Status Code: ' . $info['http_code'] . '.';
+				$code = $info['http_code'];
+			}
+			if ($errno) 
+				$msg .= 'Errno: ' . $errno . ', Error: ' . $error;
+			$msg .= " Please check your FreshBooks API URL setting and try again.";
+			$msg .= "The FreshBooks API url is different from your FreshBooks account url.";
+			
+			throw new Exception($msg, $code);
 		}
 		
 		//if xml check for FB status
-		if(preg_match("/<?xml/", $result))
+		if($info['http_code'] == 200)
 		{
 			$fbxml = simplexml_load_string($result);
 			if($fbxml->attributes()->status == 'fail')
 			{
-				return 'Error: The following FreshBooks error occurred: '.$fbxml->error;
+				throw new Exception('Error: The following FreshBooks error occurred: '.$fbxml->error);
 			}
 			else
 			{
 				return $fbxml;
 			}
-		}
+		} 
 	}
 
 	/**
@@ -133,16 +221,11 @@ Class Invoice_api
 	 **/
 	private function get_fb_projects($client_id, $page=1)
 	{
-		$xml =<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="project.list">
-				<client_id>{$client_id}</client_id>
-			  <page>{$page}</page>
-			  <per_page>100</per_page>
-			</request>
-EOL;
-
-		return $this->send_xml_request($xml); 
+		return $this->send_freshbooks_request('project.list', array(
+			'client_id' => $client_id,
+			'page'      => $page,
+			'per_page'  => '100'
+		));
 	}
 	
 	/**
@@ -153,15 +236,10 @@ EOL;
 	 **/
 	private function get_all_items($page=1)
 	{
-		$xml=<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="item.list">
-			  <page>{$page}</page>
-			  <per_page>100</per_page>
-			</request>
-EOL;
-
-	return $this->send_xml_request($xml); 
+		return $this->send_freshbooks_request('item.list', array(
+			'page'     => $page,
+			'per_page' => '100'
+		));
 	}
 	
 	/**
@@ -173,23 +251,15 @@ EOL;
 	 **/
 	private function get_all_tasks($project_id=0, $page=1)
 	{
+		$args = array(
+			'page'       => $page,
+			'per_page'   => '100'
+		);
 		
-		$xml=<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="task.list">
-EOL;
+		if ($project_id != 0) 
+			$args['project_id'] = $project_id;
 		
-		if ($project_id != 0) {
-			$xml .= "<project_id>{$project_id}</project_id>";
-		}
-		
-		$xml.=<<<EOL
-			<page>{$page}</page>
-			  <per_page>100</per_page>
-			</request>
-EOL;
-
-	return $this->send_xml_request($xml); 
+		return $this->send_freshbooks_request('task.list', $args); 
 	}
 	
 	/**
@@ -203,8 +273,11 @@ EOL;
 	{
 		//check for matching task
 		$tick_task_name = trim($tick_task);
-		$tasks = $this->get_all_tasks($project_id);
-		if (preg_match("/Error/", $tasks))
+		try 
+		{
+			$tasks = $this->get_all_tasks($project_id);
+		}
+		catch (Exception $e) 
 		{
 			return 0;
 		}
@@ -224,8 +297,11 @@ EOL;
 		if ($num_pages > 1) {
 			while ($page <= $num_pages)
 			{
-				$tasks = $this->get_all_tasks($project_id, $page);
-				if (preg_match("/Error/", $tasks))
+				try 
+				{
+					$tasks = $this->get_all_tasks($project_id, $page);
+				}
+				catch (Exception $e) 
 				{
 					return 0;
 				}
@@ -247,8 +323,11 @@ EOL;
 		$task_length = strlen($tick_task_name);
 		if($task_length <= 15)
 		{
-			$items = $this->get_all_items();
-			if (preg_match("/Error/", $items))
+			try 
+			{
+				$items = $this->get_all_items();
+			} 
+			catch (Exception $e) 
 			{
 				return 0;
 			}
@@ -268,8 +347,11 @@ EOL;
 			if ($num_pages > 1) {
 				while ($page <= $num_pages)
 				{
-					$items = $this->get_all_items();
-					if (preg_match("/Error/", $items))
+					try 
+					{
+						$items = $this->get_all_items();
+					} 
+					catch (Exception $e) 
 					{
 						return 0;
 					}
@@ -281,11 +363,11 @@ EOL;
 							$unit_cost = $item->unit_cost;
 							return $unit_cost;
 						}
-					}//end foreach
+					}
 					$page++;
-				}//end while
-			}//end if
-		}//end if
+				}
+			}
+		}
 
 		//default to zero if no task/item found
 		return 0;
@@ -327,11 +409,16 @@ EOL;
 	/**
 	 * Checks account credentials at Tickspot .. pass no constraints
 	 *
-	 * @return string/object	string containing error desc on error, xmlobject on success 
+	 * @return boolean returns true if login is successful, false otherwise. 
 	 **/
 	public function tickspot_login()
 	{
-		return $this->loadxml($this->tickurl . '/api/clients', true);
+		try {
+			$this->send_tick_request('clients');
+			return true;
+		} catch (Exception $e) {
+			return false;
+		}
 	}
 
 	/**
@@ -342,18 +429,16 @@ EOL;
 	 **/
 	public function get_all_open_entries($id = 0)
 	{
-		$all_entries = date("m/d/Y", mktime(0, 0, 0, date("m"), date("d"),   date("Y")-5));
+		$args = array(
+			'updated_at' => date("m/d/Y", mktime(0, 0, 0, date("m"), date("d"),   date("Y")-5)),
+			'entry_billable' => 'true',
+			'billed' => 'false'
+		);
 		
-		if ($id == 0)
-		{
-			$url = $this->tickurl."/api/entries?updated_at={$all_entries}&entry_billable=true&billed=false";
-		}
-		else
-		{
-			$url = $this->tickurl."/api/entries?updated_at={$all_entries}&entry_billable=true&billed=false&project_id={$id}";
-		}
+		if ($id != 0) 
+			$args['project_id'] = $id;
 		
-		return $this->loadxml($url);
+		return $this->send_tick_request('entries', $args);
 	}
 
 	/**
@@ -366,22 +451,23 @@ EOL;
 	 **/
 	public function get_open_entries($id = 0, $start_date = '', $end_date = '')
 	{
-		if ( ! $start_date)
+		if (!$start_date)
 		{
 			$start_date = date("m").'/'.'01'.'/'.date("Y");
 			$end_date = date("m/d/Y");
 		}
 		
-		if ($id === 0)
-		{
-			$url = $this->tickurl."/api/entries?start_date={$start_date}&end_date={$end_date}&entry_billable=true&billed=false";
-		}
-		else
-		{
-			$url = $this->tickurl."/api/entries?start_date={$start_date}&end_date={$end_date}&entry_billable=true&billed=false&project_id={$id}";
-		}
+		$args = array(
+			'start_date' => $start_date,
+			'end_date'   => $end_date,
+			'entry_billable' => 'true',
+			'billed'     => 'false'
+		);
 		
-		return $this->loadxml($url);
+		if ($id != 0) 
+			$args['project_id'] = $id;
+		
+		return $this->send_tick_request('entries', $args);
 	}
 	
 	/**
@@ -393,9 +479,10 @@ EOL;
 	 **/
 	public function change_billed_status($status, $id)
 	{
-		
-		$url = $this->tickurl."/api/update_entry?id={$id}&billed={$status}";
-		return $this->loadxml($url);
+		return $this->send_tick_request('update_entry', array(
+			'id' => $id, 
+			'billed' => $status
+		));
 	}
 	
 	/**
@@ -433,14 +520,9 @@ EOL;
 	 **/
 	public function get_invoice($id)
 	{
-		$xml =<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="invoice.get">
-			<invoice_id>{$id}</invoice_id>
-			</request>
-EOL;
-
-		return $this->send_xml_request($xml); 
+		return $this->send_freshbooks_request('invoice.get', array(
+			'invoice_id' => $id
+		));
 	}
 	
 	/**
@@ -451,14 +533,14 @@ EOL;
 	 **/
 	public function check_invoice_status($id)
 	{
-		$invoice_info = $this->get_invoice($id);
-		if (preg_match("/Invoice not found/", $invoice_info))
+		try 
+		{
+			$invoice_info = $this->get_invoice($id);
+			return (string)$invoice_info->invoice->status;
+		} 
+		catch (Exception $e) 
 		{
 			return 'deleted';
-		}
-		else
-		{
-			return (string)$invoice_info->invoice->status;
 		}
 	}
 
@@ -470,15 +552,10 @@ EOL;
 	 **/
 	public function get_fb_clients($page=1)
 	{
-		$xml =<<<EOL
-		<?xml version="1.0" encoding="utf-8"?>
-		<request method="client.list">
-		  <page>{$page}</page>
-		  <per_page>100</per_page>
-		</request>
-EOL;
-
-		return $this->send_xml_request($xml); 
+		return $this->send_freshbooks_request('client.list', array(
+			'page'     => $page,
+			'per_page' => '100'
+		)); 
 	}
 	
 	/**
@@ -514,11 +591,6 @@ EOL;
 	{
 		//get FB clients
 		$fbclients = $this->get_fb_clients();
-		//check for FB error
-		if (preg_match("/Error/", $fbclients))
-		{
-			return $fbclients;
-		}
 		
 		foreach ($fbclients->clients->client as $client)
 		{
@@ -527,11 +599,7 @@ EOL;
 			{
 				//get FB projects for client
 				$fb_projects = $this->get_fb_projects($client->client_id);
-				//check for FB error
-				if (preg_match("/Error/", $fb_projects))
-				{
-					return $fb_projects;
-				}
+
 				//loop through projects looking for match
 				foreach ($fb_projects->projects->project as $project)
 				{
@@ -560,11 +628,6 @@ EOL;
 			{
 				//get FB clients
 				$fbclients = $this->get_fb_clients($page);
-				//check for FB error
-				if (preg_match("/Error/", $fbclients))
-				{
-					return $fbclients;
-				}
 				
 				foreach ($fbclients->clients->client as $client)
 				{
@@ -573,11 +636,7 @@ EOL;
 					{
 						//get FB projects for client
 						$fb_projects = $this->get_fb_projects($client->client_id);
-						//check for FB error
-						if (preg_match("/Error/", $fb_projects))
-						{
-							return $fb_projects;
-						}
+						
 						//loop through projects looking for match
 						foreach ($fb_projects->projects->project as $project)
 						{
@@ -620,31 +679,23 @@ EOL;
 		$project_rate = $client_data['project_rate'];
 		$bill_method = $client_data['bill_method'];
 		
-		$xml =<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="invoice.create">
-			  <invoice>
-			    <client_id>{$client_id}</client_id>
-			    <status>draft</status>
-			    <organization>{$client_name}</organization>
-
-			    <lines>
-EOL;
+		$args = array(
+			'invoice' => array(
+				'client_id' => $client_id,
+				'status'    => 'draft',
+				'organization' => $client_name,
+				'lines' => array()
+			)
+		);
 
 		//if bill method is flat rate append line with flat rate
 		if ($bill_method == 'flat-rate')
 		{
-			$xml .=<<<EOL
-			  <line>
-	        <description>[{$project_name}] Flat Rate</description>
-	        <unit_cost>{$project_rate}</unit_cost>
-	        <quantity>1</quantity>
-	      </line>
-	    </lines>
-	  </invoice>
-   </request>
-	
-EOL;
+			$args['invoice']['lines']['line'] = array(
+				'description' => '[' . $project_name . '] Flat Rate',
+				'unit_cost'   => $project_rate,
+				'quantity'    => '1'
+			);
 		}
 		else
 		{
@@ -660,19 +711,14 @@ EOL;
 				$unit_cost_summary += ($hours * $unit_cost);
 			}//end foreach
 			
-			$xml .=<<<EOL
-		    <line>
-		        <description>[{$project_name}]</description>
-		        <unit_cost>{$unit_cost_summary}</unit_cost>
-		        <quantity>1</quantity>
-		      </line>
-		    </lines>
-		  </invoice>
-     </request>
-EOL;
+			$args['invoice']['lines']['line'] = array(
+				'description' => '[' . $project_name . ']',
+				'unit_cost'   => $unit_cost_summary,
+				'quantity'    => '1'
+			);
 		}
 		
-		return $this->send_xml_request($xml);
+		return $this->send_freshbooks_request('invoice.create', $args);
 	}
 
 	/**
@@ -693,17 +739,17 @@ EOL;
 		$bill_method = $client_data['bill_method'];
 
 		//open xml file with core data
-		$xml =<<<EOL
-			<?xml version="1.0" encoding="utf-8"?>
-			<request method="invoice.create">
-			  <invoice>
-			    <client_id>{$client_id}</client_id>
-			    <status>draft</status>
-			    <organization>{$client_name}</organization>
-					
-					<lines>
-EOL;
-		
+		$args = array(
+			'invoice' => array(
+				'client_id' => $client_id,
+				'status'    => 'draft',
+				'organization' => $client_name,
+				'lines' => array(
+					'line' => array()
+				)
+			)
+		);
+				
 		foreach ($line_item_summary as $item) 
 		{
 			//set hours
@@ -717,38 +763,28 @@ EOL;
 			//set unit cost
 			$tick_task = $item['task'];
 			$unit_cost = $this->get_billing_rate($bill_method, $tick_task, $project_rate, $project_id);
-	
-			$xml .=<<<EOL
-		      <line>
-		        <name></name>
-		        <description>{$description}</description>
-		        <unit_cost>{$unit_cost}</unit_cost>
-		        <quantity>{$hours}</quantity>
-		      </line>
-EOL;
+			
+			$args['invoice']['lines']['line'][] = array(
+				'name' => '',
+				'description' => $description,
+				'unit_cost'   => $unit_cost,
+				'quantity'    => $hours
+			);
 		}//end foreach
 		
 		//if bill method is flat rate append line with flat rate
 		if ($bill_method == 'flat-rate')
 		{
-			$xml .=<<<EOL
-			  <line>
-	        <name></name>
-	        <description>[{$project_name}] Flat Rate</description>
-	        <unit_cost>{$project_rate}</unit_cost>
-	        <quantity>1</quantity>
-	      </line>
-EOL;
+			$args['invoice']['lines']['line'][] = array(
+				'name' => '',
+				'description' => '[' . $project_name . '] Flat Rate',
+				'unit_cost'   => $project_rate,
+				'quantity'    => '1'
+			);
 		}
 		
-		$xml .=<<<EOL
-				    </lines>
-				  </invoice>
-		    </request>
-EOL;
-
 		//send invoice create request to FB
-		return $this->send_xml_request($xml);
+		return $this->send_freshbooks_request('invoice.create', $args);
 	}
 
 }

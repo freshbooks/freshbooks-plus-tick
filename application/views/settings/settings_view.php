@@ -4,10 +4,10 @@
 		
 	<div style="width: 50%;float: left;">
 		<p>We just need your FreshBooks API settings.</p>
-		<p>Log into your FreshBooks account. Click <strong>Settings</strong> then <strong>Enable FreshBooks API</strong>. Once you've enabled the API, you will see <strong>Your API URL</strong> & <strong>Your Authentication Token</strong> in the middle of that page. You'll need to enter those here to continue.</p>
+		<p>Log into your FreshBooks account. Click <strong>Settings</strong> then <strong>Enable FreshBooks API</strong>. Once you've enabled the API, you will see <strong>Your API URL</strong> &amp; <strong>Your Authentication Token</strong> in the middle of that page. You'll need to enter those here to continue.</p>
 	</div>
 	
-	<img src="<?php echo(base_url()); ?>public/images/settings.jpg" alt="FreshBooks screenshot of API settings page." style="float:right; border: 3px solid rgb(201, 201, 201); margin-left: 10px; margin-top: 10px;" />
+	<img src="<?php echo(base_url()); ?>public/images/settings.gif" alt="FreshBooks screenshot of API settings page." style="float:right; border: 3px solid rgb(201, 201, 201); margin-left: 10px; margin-top: 10px;" />
 	
 	<?php echo form_open('settings', array('id' => 'settings-form', 'class' => 'form_button'))."\n"; ?>
 	<div id="apiform">
@@ -22,9 +22,8 @@
 
 		<input type="hidden" name="tickurl" value="<?= $tickurl ?>" />
 		<input type="hidden" name="tickemail" value="<?= $tickemail ?>" />
-		<input type="hidden" name="tickpassword" value="<?= $tickpassword ?>" />
 
-		<span style="padding-left: 10px;"></span><button type="submit" name="submit"><?php echo $submitname ?></button>
+		<span style="padding-left: 10px;"></span><button type="submit" name="submit" value="<?= $submitname ?>"><?php echo $submitname ?></button>
 	</div>
 	</form>
 </div><!-- end div content -->

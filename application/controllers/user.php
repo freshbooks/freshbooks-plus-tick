@@ -5,12 +5,12 @@
  * @package User Controller
  * @author Kyle Hendricks kyleh@mendtechnologies.com
  **/
-Class User extends Controller 
+Class User extends MY_Controller 
 {
 	
 	function __construct()
 	{
-		parent::Controller();
+		parent::MY_Controller();
 		$this->load->helper(array('form', 'url', 'html'));
 	}
 	
@@ -23,17 +23,20 @@ Class User extends Controller
 	{
 		//load page specific variables
 		$loggedin = $this->session->userdata('loggedin');
+
 		$data['title'] = 'FreshBooks + Tick :: Login';
 		$data['heading'] = 'FreshBooks + Tick Login';
 		$data['error'] = FALSE;
 		$data['navigation'] = FALSE;
 
-		$data['tickurl'] = (isset($_POST['tickurl'])) ? $_POST['tickurl'] : ((isset($_COOKIE['fbplustick-url'])) ? $_COOKIE['fbplustick-url'] : 'https://xxxxx.tickspot.com');
+		$data['ticksubdomain'] = (isset($_POST['ticksubdomain'])) ? $_POST['ticksubdomain'] : ((isset($_COOKIE['fbplustick-subdomain'])) ? $_COOKIE['fbplustick-subdomain'] : '');
 		$data['tickemail'] = (isset($_POST['tickemail'])) ? $_POST['tickemail'] : ((isset($_COOKIE['fbplustick-email'])) ? $_COOKIE['fbplustick-email'] : '');
 
 		//check to see if user is logged in
 		if (!$loggedin) {
-		$this->load->view('user/login_view',$data);
+			$error = $this->session->userdata('error');
+			if ($error) $data['error'] = $error;
+			$this->load->view('user/login_view',$data);
 		}else{
 			redirect('settings/index');
 		}
@@ -52,48 +55,62 @@ Class User extends Controller
 		$data['error'] = FALSE;
 		$data['navigation'] = FALSE;
 		
-		$data['tickurl'] = (isset($_POST['tickurl'])) ? $_POST['tickurl'] : ((isset($_COOKIE['fbplustick-url'])) ? $_COOKIE['fbplustick-url'] : 'https://xxxxx.tickspot.com');
-		$data['tickemail'] = (isset($_POST['tickemail'])) ? $_POST['tickemail'] : ((isset($_COOKIE['fbplustick-email'])) ? $_COOKIE['fbplustick-email'] : '');
-
 		// assemble credentials for integration check
-		$url = $this->input->post('tickurl');
-		$email = $this->input->post('tickemail');
-		$password = $this->input->post('tickpassword');
-
+		$subdomain = $this->input->post('ticksubdomain');
+		$email     = $this->input->post('tickemail');
+		$password  = $this->input->post('tickpassword');
+		
+		$data['ticksubdomain'] = (isset($subdomain)) ? $subdomain : ((isset($_COOKIE['fbplustick-subdomain'])) ? $_COOKIE['fbplustick-subdomain'] : '');
+		$data['tickemail'] = (isset($email)) ? $email : ((isset($_COOKIE['fbplustick-email'])) ? $_COOKIE['fbplustick-email'] : '');
+		
+		// create the url out of the subdomain. try to make sure the url is well formed
+		$url = $subdomain;
+		if (substr($url, 0, 8) != 'https://') $url = 'https://' . $url;
+		if (substr($url, strlen($url) - strlen("tickspot.com")) != "tickspot.com") $url = $url . ".tickspot.com";
+		$url = preg_replace('/http\:\/\//', '', $url);
+		
+		// create an Invoice API object. 
 		$params = array(
-			'tickemail' => $email,
+			'tickemail'    => $email,
 			'tickpassword' => $password,
-			'tickurl' => $url,
-			'fburl' => '',	// default for now
-			'fbtoken' => ''	// default for now
+			'tickurl'      => $url,
+			'fburl'        => '',	// default for now
+			'fbtoken'      => ''	// default for now
 		);
-
 		$this->load->library('Invoice_api', $params);
 		$this->load->model('User_model', 'user');
-
+		
 		// get a result from tickspot using these credentials
 		if ($this->invoice_api->tickspot_login())
 		{
-			$user = $this->user->getuser($email);
-
+			$user = $this->user->get_user($email);
+			
 			if ($user)
 			{
-				//start session - set vars
-				$userinfo = array('userid' => $user->id, 'loggedin' => TRUE, 'username' => $user->email, 'name' => $user->name);
+				// update the user's key
+				$key = substr(bin2hex($email . time()), 0, 32);
+				$this->user->update_key($email, $key);
+				
+				$token = $this->encrypt->encode($password, $key);
+				
+				// start session - set vars
+				$userinfo = array(
+					'userid'    => $user->id, 
+					'loggedin'  => TRUE, 
+					'username'  => $user->email, 
+					'authtoken' => $token
+				);
 				$this->session->set_userdata($userinfo); 
-
-				// update our password in the db just to be safe (since we're piggy-backing tickspot accounts as valid)
-				$this->user->update_password($email, $password);
 
 				//check for settings if user has settings send to sync page otherwise send to settings page
 				$this->load->model('Settings_model', 'settings');
-				$got_settings = $this->settings->getSettings();
+				$got_settings = $this->settings->get_settings();
 
 				// check if cookies exist before attempting to set them
-				if (!isset($_COOKIE['fbplustick-email']) or !isset($_COOKIE['fbplustick-url']))
+				if (!isset($_COOKIE['fbplustick-email']) or !isset($_COOKIE['fbplustick-subdomain']))
 				{
 					setcookie('fbplustick-email',$email,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
-					setcookie('fbplustick-url',$url,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
+					setcookie('fbplustick-subdomain',$subdomain,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
 				}
 
 				if ($got_settings) 
@@ -107,19 +124,34 @@ Class User extends Controller
 			}
 			else
 			{
-				// hack up an insert
-				$this->user->insert_user($email, $email, $password);
+				// instead of storing the password in plaintext in the database, we 
+				// will store a key generated from the user's email and a timestamp.
+				// the key will be used to encrypt the password. the encrypted password
+				// will be stored in the session for later use. we can use the key to 
+				// decrypt it any time we need to use it. Limit the key to 32 chars so
+				// that it will work well with most encryption algorithms. 
+				
+				// store details about the user in the database. 
+				$key = substr(bin2hex($email . time()), 0, 32);
+				$this->user->insert_user($email, $key);
 
 				//get user data to set session variables 
-				$user = $this->user->getuser($email);
-
-				//set up session ans set session vars
-				$userinfo = array('userid' => $user->id, 'loggedin' => TRUE, 'username' => $user->email, 'name' => $user->name);
-				$this->session->set_userdata($userinfo); 
+				$user = $this->user->get_user($email);
+				$token = $this->encrypt->encode($password, $user->key);
+				
+				//set up session and set session vars
+				$userinfo = array(
+					'userid'    => $user->id, 
+					'loggedin'  => TRUE, 
+					'username'  => $user->email, 
+					'authtoken' => $token
+				);
+				
+				$this->session->set_userdata($userinfo);
 
 				// set up some cookie stuff
 				setcookie('fbplustick-email',$email,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
-				setcookie('fbplustick-url',$url,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
+				setcookie('fbplustick-subdomain',$subdomain,time()+3600*24*365,'/','.' . $_SERVER['SERVER_NAME']);
 
 				// redirect to populate more settings
 				redirect('settings/index');
@@ -128,6 +160,11 @@ Class User extends Controller
 		else
 		{
 			$data['error'] = "Invalid Tickspot account - please try again.";
+		}
+		
+		$error = $this->session->userdata('error');
+		if ($error) {
+			$data['error'] = $error;
 		}
 
 		$this->load->view('user/login_view',$data);

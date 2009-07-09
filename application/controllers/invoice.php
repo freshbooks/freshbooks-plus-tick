@@ -6,12 +6,12 @@
  * @author Kyle Hendricks kyleh@mendtechnologies.com
  **/
 
-Class Invoice extends Controller
+Class Invoice extends MY_Controller
 {
 	
 	function __construct()
 	{
-		parent::Controller();
+		parent::MY_Controller();
 		$this->load->helper(array('form', 'url', 'html'));
 		//$this->output->enable_profiler(TRUE);
 		
@@ -23,50 +23,6 @@ Class Invoice extends Controller
 	/**
 	 * Private Functions prefixed by _ in CodeIgniter
 	 **/
-	
-	/**
-	 * Checks user login status.
-	 *
-	 * @return bool	True on success, False and redirect to login on fail
-	 **/
-	function _check_login()
-	{
-		$loggedin = $this->session->userdata('loggedin');
-		if ( ! $loggedin)
-		{
-			redirect('user/index');
-			return FALSE;
-		}
-		else
-		{
-			return TRUE;
-		}
-	}
-	
-	/**
-	 * Gets API settings from database.
-	 *
-	 * @return array Array of API settings on success, redirect to settings page on fail
-	 **/
-	function _get_settings()
-	{
-		$this->load->model('Settings_model','settings');
-		$settings = $this->settings->getSettings();
-		if ( ! $settings)
-		{
-			redirect('settings/index');
-		}
-		else
-		{
-			return array(
-				'tickemail' => $settings->tickemail, 
-				'tickpassword' => $settings->tickpassword,
-				'tickurl' => $settings->tickurl,
-				'fburl' => $settings->fburl,
-				'fbtoken' => $settings->fbtoken,
-				);
-		}
-	}
 	
 	/**
 	 * Sorts multidimentional of entries by task
@@ -116,8 +72,8 @@ Class Invoice extends Controller
 		$data['settingsActive'] = '';
 
 		//process post data and set variables
-		$client_name = trim($this->input->post('client_name'));
-		$project_name = trim($this->input->post('project_name'));
+		$client_name = html_entity_decode(trim($this->input->post('client_name')));
+		$project_name = html_entity_decode(trim($this->input->post('project_name')));
 		$total_hours = $this->input->post('total_hours');
 		$entry_ids = $this->input->post('entry_ids');
 		$invoice_type = $this->input->post('invoice_type');
@@ -140,19 +96,27 @@ Class Invoice extends Controller
 		}
 		
 		//get FB clients
-		$fbclients = $this->invoice_api->get_fb_clients();
-		//exit on API error
-		if (preg_match("/Error/", $fbclients))
+		try
 		{
-			$data['error'] = $fbclients;
+			$fbclients = $this->invoice_api->get_fb_clients();
+		}
+		catch (Exception $e) 
+		{
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('invoice/invoice_results_view.php', $data);
 			return;
 		}
+		
 		//check for client match on first page
-		$client_id = $this->invoice_api->match_clients($fbclients, $client_name);
-		if (preg_match("/Error/", $client_id))
+		try 
 		{
-			$data['error'] = $client_id;
+			$client_id = $this->invoice_api->match_clients($fbclients, $client_name);
+		}
+		catch (Exception $e)
+		{
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('invoice/invoice_results_view.php', $data);
 			return;
 		}
@@ -163,24 +127,22 @@ Class Invoice extends Controller
 			$page = 2;
 			while ($page <= $num_pages)
 			{
-				//get FB clients
-				$fbclients = $this->invoice_api->get_fb_clients($page);
-				//exit on API error
-				if (preg_match("/Error/", $fbclients))
+				try
 				{
-					$data['error'] = $fbclients;
+					//get FB clients
+					$fbclients = $this->invoice_api->get_fb_clients($page);
+					
+					//if match returns FB client id else returns false
+					$client_id = $this->invoice_api->match_clients($fbclients, $client_name);
+				}
+				catch (Exception $e)
+				{
+					$this->check_for_auth_error($e->getMessage());
+					$data['error'] = $e->getMessage();
 					$this->load->view('invoice/invoice_results_view.php', $data);
 					return;
 				}
-				//if match returns FB client id else returns false
-				$client_id = $this->invoice_api->match_clients($fbclients, $client_name);
-				//exit on API error
-				if (preg_match("/Error/", $client_id))
-				{
-					$data['error'] = $client_id;
-					$this->load->view('invoice/invoice_results_view.php', $data);
-					return;
-				}
+				
 				//check for client match before continuing
 				if ($client_id) 
 				{
@@ -276,25 +238,26 @@ Class Invoice extends Controller
 		//remove z_Complete flag from line item summary array
 		array_splice($summary, 0, 1);
 		//attempt to create invoice in FB
-		if($invoice_type == 'summary')
+		try 
 		{
-			$create_invoice = $this->invoice_api->create_summary_invoice($client_data, $summary);
-		}
-		else
+			if($invoice_type == 'summary')
+			{
+				$create_invoice = $this->invoice_api->create_summary_invoice($client_data, $summary);
+			}
+			else
+			{
+				$create_invoice = $this->invoice_api->create_detailed_invoice($client_data, $summary);
+		  	}
+		} 
+		catch (Exception $e) 
 		{
-			$create_invoice = $this->invoice_api->create_detailed_invoice($client_data, $summary);
-	  }
-		//exit on API error
-		if (preg_match("/Error/", $create_invoice))
-		{
-			$data['error'] = $create_invoice;
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('invoice/invoice_results_view.php', $data);
 			return;
 		}
-		else
-		{
-			$data['invoice_results'] = "Your invoice was created successfully.";
-		}
+		
+		$data['invoice_results'] = "Your invoice was created successfully.";
 		
 		//add entry id to join table
 		$this->load->model('Entries_model', 'entries');
@@ -303,17 +266,21 @@ Class Invoice extends Controller
 		$entries = explode(',', $this->input->post('entry_ids',TRUE));
 		array_pop($entries);
 		$insert_entries = $this->entries->insertEntries($entries, $invoice_id);
-		//Mark entries as billed=true in tick
-		foreach ($entries as $entry) 
-		{
-			$this->invoice_api->change_billed_status('true', $entry);
-		}
 		
-		// get invoice data to create link to FB invoice
-		$invoice_by_id = $this->invoice_api->get_invoice($invoice_id);
-		if (preg_match("/Error/", $invoice_by_id)) 
+		try
 		{
-			$data['error'] = $invoice_by_id;
+			//Mark entries as billed=true in tick
+			foreach ($entries as $entry) 
+			{
+				$this->invoice_api->change_billed_status('true', $entry);
+			}
+			// get invoice data to create link to FB invoice
+			$invoice_by_id = $this->invoice_api->get_invoice($invoice_id);
+		}
+		catch (Exception $e) 
+		{
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('invoice/invoice_results_view.php', $data);
 			return;
 		}

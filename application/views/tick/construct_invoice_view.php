@@ -5,7 +5,7 @@
 	<h1><?php echo $heading ?></h1>
 	<div id="invoice_range" class="border">
 		<div class="left_info">
-			<p class="client"><?php echo $project_name; ?> - <?php echo $client_name; ?>
+			<p class="client"><?php echo htmlentities($project_name); ?> - <?php echo htmlentities($client_name); ?>
             <br class="clear" />
             <br class="clear" />
 			<? echo anchor('tick/select_project', 'Select A Different Project'); ?></p>
@@ -18,9 +18,9 @@
 				$attributes = array('class' => 'form_button');
 				echo form_open('tick/construct_invoice', $attributes)."\n"; 
 				?>
-					<input type="hidden" name="project_name" value="<?php echo $project_name ?>" />
-					<input type="hidden" name="client_name" value="<?php echo $client_name ?>" />
-					<input type="hidden" name="project_id" value="<?php echo $project_id; ?>" />
+					<input type="hidden" name="project_name" value="<?php echo htmlentities($project_name); ?>" />
+					<input type="hidden" name="client_name" value="<?php echo htmlentities($client_name); ?>" />
+					<input type="hidden" name="project_id" value="<?php echo htmlentities($project_id); ?>" />
 					<input type="hidden" name="filter" value="get_all" />
 					<button type="submit" name="all_entries">Use All<br />Entries</button>
 				</form>
@@ -33,9 +33,9 @@
 				?>
 					<button type="submit" name="refresh_entries">Refresh<br />Entries</button>
 					<input type="hidden" name="filter" value="refresh" />
-					<input type="hidden" name="project_name" value="<?php echo $project_name ?>" />
-					<input type="hidden" name="client_name" value="<?php echo $client_name ?>" />
-					<input type="hidden" name="project_id" value="<?php echo $project_id; ?>" />
+					<input type="hidden" name="project_name" value="<?php echo htmlentities($project_name); ?>" />
+					<input type="hidden" name="client_name" value="<?php echo htmlentities($client_name); ?>" />
+					<input type="hidden" name="project_id" value="<?php echo htmlentities($project_id); ?>" />
 	    </div><!-- end div border button -->
 	<!-- TODO Date Pickers -->
 					<div class="border_picker"> 
@@ -116,7 +116,7 @@
 					<!-- end line item -->
 				<?php endforeach ?>
 				<input type="hidden" name="num_line_items" value="<?php echo $num; ?>" />
-	       <button type="submit" name="invoice_type" value="detailed" onclick="dis(this);">Create<br />Invoice</button>
+	            <button type="submit" name="invoice_type" value="detailed">Create<br />Invoice</button>
 			</form>	
 		</div><!-- end div border button -->
 	</div>
@@ -142,7 +142,7 @@
 					<!-- end line item -->
 				<?php endforeach ?>
 				<input type="hidden" name="num_line_items" value="<?php echo $num; ?>" />
-				<button type="submit" name="invoice_type" value="summary" onclick="dis(this);">Create<br />Invoice</button>
+				<button type="submit" name="invoice_type" value="summary">Create<br />Invoice</button>
 			</form>
 		</div>
 	</div>  

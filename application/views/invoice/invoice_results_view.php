@@ -10,7 +10,7 @@
 	
 <?php if ($error): ?>
 	<div id="invoice_results" class="border">
-			<p><?php echo $error; ?></p>
+			<p><?php echo htmlentities($error); ?></p>
 	</div><!-- end div invoice_results-->	
 	<?php echo anchor('tick/index', 'Create Another Invoice');?>
 <?php endif //end error?>
@@ -22,20 +22,20 @@
 
 	<?php echo form_open('invoice/create_invoice', array('class' => 'form_button')); ?>
 		<?php foreach ($post_data as $key => $value): ?>
-			<input type="hidden" name="<?php echo $key ?>" value="<?php echo $value; ?>" />
+			<input type="hidden" name="<?php echo $key ?>" value="<?php echo htmlentities($value); ?>" />
 		<?php endforeach ?>
 		<?php if ($line_items): ?>
 			<?php $num = 1; ?>
 			<!-- line items -->
 			<?php foreach ($line_items as $item): ?>
 				<?php foreach ($item as $key => $value): ?>
-					<input type="hidden" name="<?php echo $key.'_'.$num; ?>" value="<?php echo $value; ?>" />
+					<input type="hidden" name="<?php echo $key.'_'.$num; ?>" value="<?php echo htmlentities($value); ?>" />
 				<?php endforeach ?>
 			<?php $num++; ?>
 			<?php endforeach ?>
 			<input type="hidden" name="num_line_items" value="<?php echo $num_line_items; ?>" />
 		<?php endif ?>
-    	<button type="submit" name="submit_invoice" onclick="dis(this);">Re-Submit<br />Invoice</button>
+    	<button type="submit" name="submit_invoice">Re-Submit<br />Invoice</button>
 	</form>
 <?php endif ?>	
 

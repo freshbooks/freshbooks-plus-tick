@@ -7,11 +7,11 @@
  * @package Tick Controller
  * @author Kyle Hendricks kyleh@mendtechnologies.com
  **/
-Class Tick extends Controller
+Class Tick extends MY_Controller
 {
 	function __construct()
 	{
-		parent::Controller();
+		parent::MY_Controller();
 		$this->load->helper(array('form', 'url', 'html'));
 		//$this->output->enable_profiler(TRUE);
 		
@@ -23,50 +23,6 @@ Class Tick extends Controller
 	/**
 	 * Private Functions prefixed by _ in CodeIgniter
 	 **/
-	
-	/**
-	 * Checks user login status.
-	 *
-	 * @return bool	True on success, False and redirect to login on fail
-	 **/
-	function _check_login()
-	{
-		$loggedin = $this->session->userdata('loggedin');
-		if ( ! $loggedin)
-		{
-			redirect('user/index');
-			return FALSE;
-		}
-		else
-		{
-			return TRUE;	
-		}
-	}
-	
-	/**
-	 * Gets API settings from database.
-	 *
-	 * @return array Array of API settings on success, redirect to settings page on fail
-	 **/
-	function _get_settings()
-	{
-		$this->load->model('Settings_model','settings');
-		$settings = $this->settings->getSettings();
-		if ( ! $settings)
-		{
-			redirect('settings/index');
-		}
-		else
-		{
-			return array(
-							'tickemail' => $settings->tickemail, 
-							'tickpassword' => $settings->tickpassword,
-							'tickurl' => $settings->tickurl,
-							'fburl' => $settings->fburl,
-							'fbtoken' => $settings->fbtoken,
-							);
-		}
-	}
 
 	/**
 	 * Checks invoice status in FreshBooks of previously created invoices.
@@ -74,7 +30,7 @@ Class Tick extends Controller
 	 * If status is draft it does nothing.
 	 * If status is anything else it deletes entries in join table.
 	 *
-	 * @return string returns error details on fail
+	 * @throws Exception Throws an exception with error details on failure. 
 	 **/
 	function _updateJoinTable()
 	{
@@ -86,37 +42,39 @@ Class Tick extends Controller
 			foreach ($fb_ids as $id)
 			{
 				$invoice_id = $id->fb_invoice_id;
-				$status = $this->invoice_api->check_invoice_status($invoice_id);
-				//exit on API error
-				if (preg_match("/Error/", $status))
-				{
-					throw new Exception($status);
-				}
-				
+				$status = $this->invoice_api->check_invoice_status($invoice_id);				
 				$entries_ids = $this->entries->getEntriesIds($invoice_id);
+				if (!is_array($entries_ids)) $entries_ids = array();
+									
 				if ($status == 'deleted')
-				{//if deleted change billing status to false and delete join record
+				{
+					// if deleted, change billing status to false 
+					// and delete join record
 					foreach ($entries_ids as $entry_id)
 					{
-						$mark_not_billed = $this->invoice_api->change_billed_status('false', (integer)$entry_id->ts_entry_id);
-						//exit on API error
-						if (preg_match("/Error/", $mark_not_billed))
-						{
-							throw new Exception($mark_not_billed);
+						// ignore 404's when changing billed status. If the 
+						// entry can't be found in tickspot, it's likely stale
+						// data and should be deleted anyway. 
+						try {
+							$mark_not_billed = $this->invoice_api->change_billed_status('false', (integer)$entry_id->ts_entry_id);
+						} catch (Exception $e) {
+							if ($e->getCode() != 404) {
+								throw $e;
+							}
 						}
-						
 						$deleted_entries = $this->entries->deleteEntry((integer)$entry_id->ts_entry_id);
-					}//endforeach
+					}
 				}
 				elseif(!$status == 'draft')
-				{//if status is not draft delete join record
+				{
+					// if status is not draft delete join record
 					foreach ($entries_ids as $entry_id)
 					{
 						$deleted_entries = $this->entries->deleteEntry((integer)$entry_id->ts_entry_id);
-					}//endforeach
-				}//endif
-			}//end foreach
-		}//endif
+					}
+				}
+			}
+		}
 	}
 	
 	/**
@@ -172,18 +130,21 @@ Class Tick extends Controller
 		}
 		catch (Exception $e) 
 		{
+			$this->check_for_auth_error($e->getMessage());
 			$data['error'] = $e->getMessage();
 			$this->load->view('tick/select_project_view', $data);
 			return;
 		}
 		
 		//get open entries in tickspot - group by project - remove duplicates
-		$ts_entries = $this->invoice_api->get_all_open_entries();
-		
-		//exit on API error
-		if (preg_match("/Error/", $ts_entries))
+		try 
 		{
-			$data['error'] = $ts_entries;
+			$ts_entries = $this->invoice_api->get_all_open_entries();
+		} 
+		catch (Exception $e) 
+		{
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('tick/select_project_view', $data);
 			return;
 		}
@@ -236,26 +197,41 @@ Class Tick extends Controller
 		$data['projectsActive'] = array('class' => 'active');
 		$data['settingsActive'] = '';
 
-		if ($this->input->post('filter') == 'refresh')
+		try 
 		{
-			$date = $this->input->post('options');
-			$start_date = $date['start_date'];
-			$end_date = $date['end_date'];
-			$ts_entries = $this->invoice_api->get_open_entries($project_id,$start_date,$end_date);
+			if ($this->input->post('filter') == 'refresh')
+			{
+				$date = $this->input->post('options');
+				$start_date = $date['start_date'];
+				$end_date = $date['end_date'];
+				$ts_entries = $this->invoice_api->get_open_entries($project_id,$start_date,$end_date);
+			}
+			else
+			{
+				$ts_entries = $this->invoice_api->get_all_open_entries($project_id);
+			}
 		}
-		else
+		catch (Exception $e) 
 		{
-			$ts_entries = $this->invoice_api->get_all_open_entries($project_id);
-		}
-		//exit on API error
-		if (preg_match("/Error/", $ts_entries))
-		{
-			$data['error'] = $ts_entries;
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
 			$this->load->view('tick/select_project', $data);
 			return;
 		}
-		//process entries into mulitdimential array for sorting
-		$ts_entries_to_array = $this->invoice_api->process_entries($ts_entries);
+
+		try
+		{
+			//process entries into mulitdimential array for sorting
+			$ts_entries_to_array = $this->invoice_api->process_entries($ts_entries);
+		}
+		catch (Exception $e) 
+		{
+			$this->check_for_auth_error($e->getMessage());
+			$data['error'] = $e->getMessage();
+			$this->load->view('tick/select_project', $data);
+			return;
+		}
+		
 		//sort array by date using private date_sort method
 		usort($ts_entries_to_array, array("Tick", '_date_sort'));
 		

@@ -109,6 +109,15 @@ label {
 	width: 126px;
 }
 
+#email-login-label {
+	margin-top: 8px;
+}
+
+#url-help-text {
+	font-size: 10px; 
+	padding-left: 148px;
+}
+
 input[type="text"], input[type="password"] {
 	padding: 4px;
 }

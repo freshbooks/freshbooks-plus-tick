@@ -20,7 +20,7 @@ Class Settings_model extends Model
 	 *
 	 * @return settings object row if records exit, False on no records
 	 **/
-	function getSettings()
+	function get_settings()
 	{
 		$userid = $this->session->userdata('userid');
 		$this->db->where('userid', $userid);
@@ -45,8 +45,7 @@ Class Settings_model extends Model
 			'fburl' => $this->input->post('fburl'),
 			'fbtoken' => $this->input->post('fbtoken'),
 			'tickurl' => $this->input->post('tickurl'),
-			'tickemail' => $this->input->post('tickemail'),
-			'tickpassword' => $this->input->post('tickpassword')
+			'tickemail' => $this->input->post('tickemail')
 			);
 	    
 		$this->db->insert('apisettings', $data);
@@ -64,8 +63,7 @@ Class Settings_model extends Model
 			'fburl' => $this->input->post('fburl'),
 			'fbtoken' => $this->input->post('fbtoken'),
 			'tickurl' => $this->input->post('tickurl'),
-			'tickemail' => $this->input->post('tickemail'),
-			'tickpassword' => $this->input->post('tickpassword')
+			'tickemail' => $this->input->post('tickemail')
 			);
 		
 		$this->db->where('userid', $userid);
