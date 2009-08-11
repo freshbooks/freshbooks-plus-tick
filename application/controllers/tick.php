@@ -52,13 +52,13 @@ Class Tick extends MY_Controller
 					// and delete join record
 					foreach ($entries_ids as $entry_id)
 					{
-						// ignore 404's when changing billed status. If the 
+						// ignore 404's or 400's when changing billed status. If the 
 						// entry can't be found in tickspot, it's likely stale
 						// data and should be deleted anyway. 
 						try {
 							$mark_not_billed = $this->invoice_api->change_billed_status('false', (integer)$entry_id->ts_entry_id);
 						} catch (Exception $e) {
-							if ($e->getCode() != 404) {
+							if ($e->getCode() != 404 && $e->getCode() != 400) {
 								throw $e;
 							}
 						}

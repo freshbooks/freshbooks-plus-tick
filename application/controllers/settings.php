@@ -37,7 +37,12 @@ Class Settings extends MY_Controller
 		$data['fbtoken'] = '';
 
 		// load up tick stuff
-		$data['tickurl'] = $_COOKIE['fbplustick-url'];
+		$url = $_COOKIE['fbplustick-subdomain'];
+		if (substr($url, 0, 8) != 'https://') $url = 'https://' . $url;
+		if (substr($url, strlen($url) - strlen("tickspot.com")) != "tickspot.com") $url = $url . ".tickspot.com";
+		$url = preg_replace('/http\:\/\//', '', $url);
+		
+		$data['tickurl'] = $url;
 		$data['tickemail']   = $_COOKIE['fbplustick-email'];
 
 		// navigation hack

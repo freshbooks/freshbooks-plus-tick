@@ -72,8 +72,8 @@ Class Invoice extends MY_Controller
 		$data['settingsActive'] = '';
 
 		//process post data and set variables
-		$client_name = html_entity_decode(trim($this->input->post('client_name')));
-		$project_name = html_entity_decode(trim($this->input->post('project_name')));
+		$client_name = trim($this->input->post('client_name'));
+		$project_name = trim($this->input->post('project_name'));
 		$total_hours = $this->input->post('total_hours');
 		$entry_ids = $this->input->post('entry_ids');
 		$invoice_type = $this->input->post('invoice_type');
